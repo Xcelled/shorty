@@ -21,10 +21,6 @@ def toNativeModifiers(flags):
 	return native
 #enddef
 
-def toNativeKeycode(key):
-	return key
-#enddef
-
 class X11Shorty:
 	''' X11 Variant of shortcut manager '''
 	def __init__(self):
