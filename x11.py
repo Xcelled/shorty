@@ -1,59 +1,16 @@
-import ctypes, os
+from threading import Thread
+
+from Xlib import X,threaded
+from Xlib.display import Display
+from Xlib.ext import xinput
+from Xlib.protocol.request import GrabKey, UngrabKey
 from shared import *
 
-xlib = ctypes.cdll.LoadLibrary('libX11.so')
-
-class X11:
-	''' X11 stuff '''
-
-	# Keyboard modifiers
-	ShiftMask = (1<<0)
-	LockMask = (1<<1)
-	ControlMask = (1<<2)
-	Mod1Mask = (1<<3) # alt
-	Mod2Mask = (1<<4) # num lock
-	Mod3Mask = (1<<5) # scroll lock
-	Mod4Mask = (1<<6) # Meta
-	Mod5Mask = (1<<7) # 3rd level shift
-	AnyModifier	= (1<<15)
-
-	GrabModeAsync = 1
-	KeyPressMask = 1
-
-	class xcb_generic_event_t(ctypes.Structure):
-		_fields_ = (
-			('response_type', ctypes.c_ubyte),
-			('pad0', ctypes.c_ubyte),
-			('sequence', ctypes.c_ushort),
-			('pad', ctypes.c_uint*7),
-			('full_sequence', ctypes.c_uint),
-		)
-	#endclass
-
-	class xcb_key_press_event_t(ctypes.Structure):
-		_fields_ = (
-			('response_type', ctypes.c_ubyte),
-			('detail', ctypes.c_ubyte),
-			('sequence', ctypes.c_ushort),
-			('time', ctypes.c_uint),
-			('root', ctypes.c_uint),
-			('event', ctypes.c_uint),
-			('child', ctypes.c_uint),
-			('root_x', ctypes.c_short),
-			('root_y', ctypes.c_short),
-			('event_x', ctypes.c_short),
-			('event_y', ctypes.c_short),
-			('state', ctypes.c_ushort),
-			('same_screen', ctypes.c_ubyte),
-			('pad0', ctypes.c_ubyte),
-		)
-#endclass
-
 def toNativeModifiers(flags):
-	''' Converts the standard modifier flags to X11's '''
+	''' Converts the standard modifier flags to X's '''
 	map = zip(
 		[Modifiers.Shift, Modifiers.Control, Modifiers.Alt, Modifiers.Meta],
-		[X11.ShiftMask  , X11.ControlMask  , X11.Mod1Mask , X11.Mod4Mask  ]
+		[X.ShiftMask  , X.ControlMask  , X.Mod1Mask , X.Mod4Mask  ]
 		)
 
 	native = 0
@@ -71,45 +28,51 @@ def toNativeKeycode(key):
 class X11Shorty:
 	''' X11 Variant of shortcut manager '''
 	def __init__(self):
-		self.display = xlib.XOpenDisplay(os.environ['DISPLAY'])
-		self.ignored = [0, X11.LockMask, X11.Mod2Mask, X11.LockMask | X11.Mod2Mask]
-		self.root = xlib.XDefaultRootWindow(self.display)
+		self.display = Display()
+		self.root = self.display.screen().root
+
+		self.ignored = [0, X.LockMask, X.Mod2Mask, X.LockMask | X.Mod2Mask]
 	#enddef
 
 	def __del__(self):
-		XCloseDisplay(self.display)
+		self.display.close()
 	#enddef
 
 	def _listenerLoop(self):
-		xlib.XSelectInput(self.display, self.root, X11.KeyPressMask)
-
+		self.root.xinput_select_events([(xinput.AllDevices, xinput.KeyPressMask)])
 		while True:
-			xlib.XNextEvent(self.display)
-
+			event = self.display.next_event()
+			if event.type == X.KeyPress:
+				#handle
+				pass
+			#endif
+		#endwhile
+	#enddef
 
 	def _grabKey(self, keycode, modifiers, window):
-		xlib.XGrabKey(self.display, keycode, modifiers, window, True, GrabModeAsync, GrabModeAsync)
+		GrabKey(self.display.display, owner_events=True, grab_window=window,
+				modifiers=modifiers, key=keycode,
+				pointer_mode = X.GrabModeAsync, keyboard_mode=X.GrabModeAsync)
 
-		return True # TODO: error handling
+		return True # TODO: error handling?
 	#enddef
 
 	def _ungrabKey(self, keycode, modifiers, window):
-		xlib.XUngrabKey(self.display, keycode, modifiers, window)
+		UngrabKey(self.display.display, grab_window=window,	modifiers=modifiers, key=keycode)
 
-		return True # TODO: error handling
+		return True # TODO: error handling?
 	#enddef
 
-	def registerShortcut(self, key, modifiers):
+	def registerShortcut(self, key, modifiers, callback):
 		# X has a stupid system where even the numlock counts as
 		# a modifier. So have to register multiple hotkeys, one for
 		# each combination of modifiers we don't care about
 		
 		nativeKey = toNativeKeycode(key)
 		nativeMod = toNativeModifiers(modifiers)
-		win = self._rootWindow()
 
 		for i in self.ignored:
-			if not self._grabKey(nativeKey, nativeMod | i, win): return False
+			if not self._grabKey(nativeKey, nativeMod | i, self.root): return False
 		#endfor
 
 		return True
@@ -118,10 +81,9 @@ class X11Shorty:
 	def unregisterShortcut(self, key, modifiers):
 		nativeKey = toNativeKeycode(key)
 		nativeMod = toNativeModifiers(modifiers)
-		win = self._rootWindow()
 
 		for i in self.ignored:
-			self._ungrabKey(nativeKey, nativeMod | i, win)
+			self._ungrabKey(nativeKey, nativeMod | i, self.root)
 		#endfor
 	#enddef
 #endclass
